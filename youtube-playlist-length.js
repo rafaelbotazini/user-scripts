@@ -4,8 +4,9 @@
 // @match       https://www.youtube.com/playlist
 // @match       https://www.youtube.com/watch
 // @grant       GM_getValue
-// @version     1.0
+// @version     1.1
 // @author      Rafael Botazini
+// @downloadURL https://raw.githubusercontent.com/rafaelbotazini/user-scripts/main/youtube-playlist-length.js
 // @description Shows the current playlist total length at the playlist description section
 // ==/UserScript==
 
@@ -16,7 +17,7 @@ API_KEY && getPlaylistDuration()
     if (!result) return
 
     const [duration, seconds] = result
-    
+
     const at125 = parseDuration(Math.round(seconds / 1.25))
     const at150 = parseDuration(Math.round(seconds / 1.5))
     const at175 = parseDuration(Math.round(seconds / 1.75))
@@ -27,7 +28,7 @@ API_KEY && getPlaylistDuration()
 
     const $duration = document.createElement('yt-formatted-string')
     let $container
-    
+
     // change elements based on location
     if (window.location.pathname.startsWith('/playlist')) {
       $container = document.getElementById('stats')
@@ -37,7 +38,7 @@ API_KEY && getPlaylistDuration()
       copyClassList($container.lastElementChild, $duration)
       html = '&nbsp;-&nbsp;' + html
     }
-  
+
     $container.appendChild($duration)
     $duration.innerHTML = html
     $duration.title = title
@@ -49,21 +50,24 @@ function copyClassList(sourceEl, targetEl) {
   DOMTokenList.prototype.add.apply(targetEl.classList, classes)
 }
 
-async function getPlaylistDuration() {  
+async function getPlaylistDuration() {
   const search = new URLSearchParams(window.location.search)
   const playlistId = search.get('list')
-  
+
   if (!playlistId) return
 
   const playlistUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&maxResults=50&fields=items/contentDetails/videoId,pageInfo,nextPageToken&key=${API_KEY}&playlistId=${playlistId}&pageToken=`
   const videosUrl = `https://www.googleapis.com/youtube/v3/videos?&part=contentDetails&fields=items/contentDetails/duration&key=${API_KEY}&id=`
 
+  let count = 0
   let totalDuration = 0
   let nextPageToken = ''
+  let hasNext = false
 
   do {
     const playlistResponse = await fetch(playlistUrl + nextPageToken).then(r => r.json())
     const videoIds = playlistResponse.items.map(x => x.contentDetails.videoId)
+    count += playlistResponse.items.length
 
     const videosResponse = await fetch(videosUrl + videoIds.join(',')).then(r => r.json())
     const durations = videosResponse.items.map(x => x.contentDetails.duration)
@@ -71,12 +75,14 @@ async function getPlaylistDuration() {
     const seconds = durations.reduce((acc, duration) => acc + parseDurationToSeconds(duration), 0)
     totalDuration += seconds
     nextPageToken = playlistResponse.nextPageToken
-  } while (nextPageToken)
+    // compare results to prevent infinite requests from radio playlists
+    hasNext = nextPageToken && count < playlistResponse.pageInfo.totalResults
+  } while (hasNext)
 
   const duration = parseDuration(totalDuration)
 
   // console.log(`Total playlist duration: ${duration}`)
-  
+
   return [duration, totalDuration]
 }
 
