@@ -4,8 +4,9 @@
 // @match       https://www.youtube.com/playlist
 // @match       https://www.youtube.com/watch
 // @grant       GM_getValue
-// @version     1.1
+// @version     1.1.1
 // @author      Rafael Botazini
+// @homepageURL https://github.com/rafaelbotazini/user-scripts
 // @downloadURL https://raw.githubusercontent.com/rafaelbotazini/user-scripts/main/youtube-playlist-length.js
 // @description Shows the current playlist total length at the playlist description section
 // ==/UserScript==
