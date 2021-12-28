@@ -1,62 +1,115 @@
 // ==UserScript==
 // @name        YouTube Playlist Duration
 // @namespace   Violentmonkey Scripts
-// @match       https://www.youtube.com/playlist
-// @match       https://www.youtube.com/watch
+// @match       https://www.youtube.com/*
 // @grant       GM_getValue
-// @version     1.1.2
+// @version     1.2.0
 // @author      Rafael Botazini
 // @homepageURL https://github.com/rafaelbotazini/user-scripts
 // @downloadURL https://raw.githubusercontent.com/rafaelbotazini/user-scripts/main/youtube-playlist-length.js
 // @description Shows the current playlist total length at the playlist description section
+// 
+// @require  http://ajax.googleapis.com/ajax/libs/jquery/1.8.3/jquery.min.js
+// @require  https://gist.github.com/raw/2625891/waitForKeyElements.js
 // ==/UserScript==
 
 const API_KEY = GM_getValue('apiKey', '')
 
-API_KEY && getPlaylistDuration()
-  .then((result) => {
-    if (!result) return
-
-    const [duration, seconds] = result
-
-    const at125 = parseDuration(Math.round(seconds / 1.25))
-    const at150 = parseDuration(Math.round(seconds / 1.5))
-    const at175 = parseDuration(Math.round(seconds / 1.75))
-    const at200 = parseDuration(Math.round(seconds / 2))
-
-    let title = `${at125} at 1.25x • ${at150} at 1.5x • ${at175} at 1.75x • ${at200} at 2x`
-    let html = duration.toString()
-
-    const $duration = document.createElement('yt-formatted-string')
-    let $container
-
-    // change elements based on location
-    if (window.location.pathname.startsWith('/playlist')) {
-      $container = document.getElementById('stats')
-      copyClassList($container.firstElementChild, $duration)
-    } else {
-      $container = document.querySelector('ytd-playlist-panel-renderer:not([hidden]) #publisher-container')
-      copyClassList($container.lastElementChild, $duration)
-      html = '&nbsp;-&nbsp;' + html
-    }
-
-    $container.appendChild($duration)
-    $duration.innerHTML = html
-    $duration.title = title
-  })
-  .catch(console.error)
-
-function copyClassList(sourceEl, targetEl) {
-  const classes = sourceEl.classList.value.split(' ');
-  DOMTokenList.prototype.add.apply(targetEl.classList, classes)
+if (!API_KEY) {
+  console.warn("No apiKey value was detected. Check YouTube Playlist Duration script configuration.")
+  return
 }
 
-async function getPlaylistDuration() {
+// global mutables
+let gCurrentPath = ''
+let gCurrentPlaylist = ''
+
+// wait for elements to be ready and observe changes
+;[
+  "ytd-playlist-panel-renderer:not([hidden])",
+  "ytd-playlist-sidebar-primary-info-renderer:not([hidden])"
+].forEach((selector) => waitForKeyElements(selector, function ($this) {
+  // fire on ready
+  main()
+
+  // fire on changes
+  const observer = new MutationObserver(main)
+  const element = $this[0]
+  observer.observe(element, { childList: true, subtree: true })
+}))
+
+
+function main() {
   const search = new URLSearchParams(window.location.search)
   const playlistId = search.get('list')
 
+  // exit if not a playlist page
   if (!playlistId) return
 
+  // exit if change was already detected
+  if(playlistId === gCurrentPlaylist && gCurrentPath === window.location.pathname) return
+
+  gCurrentPath = window.location.pathname
+  gCurrentPlaylist = playlistId
+
+  // create or use already created label
+  let $duration = document.getElementById('yt-playlist-duration')
+
+  if (!$duration) {
+    $duration = document.createElement('yt-formatted-string')
+    $duration.id = 'yt-playlist-duration'
+  }
+
+  $duration.innerHTML = '...'
+  $duration.title = 'Fetching playlist duration...'
+
+  const isPlaylistPage = window.location.pathname.startsWith('/playlist')
+
+  let $container
+
+  // change elements based on location
+  if (isPlaylistPage) {
+    $container = document.getElementById('stats')
+    copyClassList($container.firstElementChild, $duration)
+  } else {
+    $container = document.querySelector('ytd-playlist-panel-renderer:not([hidden]) #publisher-container')
+    copyClassList($container.lastElementChild, $duration)
+  }
+
+  $container.appendChild($duration)
+  
+  getPlaylistDuration(playlistId)
+    .then((result) => {
+      if (!result) return
+
+      const [duration, seconds] = result
+
+      const at125 = parseDuration(Math.round(seconds / 1.25))
+      const at150 = parseDuration(Math.round(seconds / 1.5))
+      const at175 = parseDuration(Math.round(seconds / 1.75))
+      const at200 = parseDuration(Math.round(seconds / 2))
+
+      let title = `${at125} at 1.25x • ${at150} at 1.5x • ${at175} at 1.75x • ${at200} at 2x`
+      let html = duration.toString()
+
+      if (!isPlaylistPage) {
+        html = '&nbsp;-&nbsp;' + html
+      }
+
+      $duration.innerHTML = html
+      $duration.title = title
+    })
+    .catch(console.error)
+}
+
+function copyClassList(sourceEl, targetEl) {
+  // remove all classes from target
+  DOMTokenList.prototype.remove.apply(targetEl.classList, targetEl.classList)
+  // add classes from source
+  DOMTokenList.prototype.add.apply(targetEl.classList, sourceEl.classList)
+}
+
+async function getPlaylistDuration(playlistId) {
   const playlistUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&maxResults=50&fields=items/contentDetails/videoId,pageInfo,nextPageToken&key=${API_KEY}&playlistId=${playlistId}&pageToken=`
   const videosUrl = `https://www.googleapis.com/youtube/v3/videos?&part=contentDetails&fields=items/contentDetails/duration&key=${API_KEY}&id=`
 
