@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://www.youtube.com/*
 // @grant       GM_getValue
-// @version     1.2.0
+// @version     1.3.0
 // @author      Rafael Botazini
 // @homepageURL https://github.com/rafaelbotazini/user-scripts
 // @downloadURL https://raw.githubusercontent.com/rafaelbotazini/user-scripts/main/youtube-playlist-length.js
@@ -14,25 +14,29 @@
 // ==/UserScript==
 
 const API_KEY = GM_getValue('apiKey', '')
+const LOG_ENABLED = GM_getValue('logEnabled', false)
+const USE_LONG_DESCRIPTION = GM_getValue('useLongDescription', true)
 
 if (!API_KEY) {
   console.warn("No apiKey value was detected. Check YouTube Playlist Duration script configuration.")
   return
 }
 
-// global mutables
+// Since the pages are loaded dinamically via AJAX, we will listen for node changes to trigger the
+// playlists information querying. So, in order to prevent unnecessary api calls when the node of an already
+// loaded playlist changes, we will cache the current playlist path and id
 let gCurrentPath = ''
 let gCurrentPlaylist = ''
 
 // wait for elements to be ready and observe changes
 ;[
-  "ytd-playlist-panel-renderer:not([hidden])",
-  "ytd-playlist-sidebar-primary-info-renderer:not([hidden])"
+  "ytd-playlist-panel-renderer:not([hidden])", // sidebar of playlist page (/playlist?list=abcd)
+  "ytd-playlist-sidebar-primary-info-renderer:not([hidden])" // sidebar of watch page for videos within a playlist (/watch?v=1234&list=abcd)
 ].forEach((selector) => waitForKeyElements(selector, function ($this) {
-  // fire on ready
+  // trigger on ready
   main()
 
-  // fire on changes
+  // trigger on changes
   const observer = new MutationObserver(main)
   const element = $this[0]
   observer.observe(element, { childList: true, subtree: true })
@@ -66,14 +70,23 @@ function main() {
   const isPlaylistPage = window.location.pathname.startsWith('/playlist')
 
   let $container
+  let $cssSource
 
   // change elements based on location
   if (isPlaylistPage) {
     $container = document.getElementById('stats')
-    copyClassList($container.firstElementChild, $duration)
+    $cssSource = $container.firstElementChild
   } else {
     $container = document.querySelector('ytd-playlist-panel-renderer:not([hidden]) #publisher-container')
-    copyClassList($container.lastElementChild, $duration)
+    $cssSource = $container.lastElementChild
+  }
+  
+  // prevent removing css if already appended
+  if ($duration !== $cssSource) {
+    // remove all classes from target
+    DOMTokenList.prototype.remove.apply($duration.classList, $duration.classList)
+    // add classes from source
+    DOMTokenList.prototype.add.apply($duration.classList, $cssSource.classList)
   }
 
   $container.appendChild($duration)
@@ -99,14 +112,11 @@ function main() {
       $duration.innerHTML = html
       $duration.title = title
     })
-    .catch(console.error)
-}
-
-function copyClassList(sourceEl, targetEl) {
-  // remove all classes from target
-  DOMTokenList.prototype.remove.apply(targetEl.classList, targetEl.classList)
-  // add classes from source
-  DOMTokenList.prototype.add.apply(targetEl.classList, sourceEl.classList)
+    .catch((err) => {
+      LOG_ENABLED && console.error(err)
+      $duration.innerHTML = 'N/A'
+      $duration.title = 'Playlist duration not available'
+    })
 }
 
 async function getPlaylistDuration(playlistId) {
@@ -135,7 +145,7 @@ async function getPlaylistDuration(playlistId) {
 
   const duration = parseDuration(totalDuration)
 
-  // console.log(`Total playlist duration: ${duration}`)
+  LOG_ENABLED && console.log(`Total playlist duration: ${duration}`)
 
   return [duration, totalDuration]
 }
@@ -170,18 +180,21 @@ function parseDuration(seconds) {
   let duration = { year: 0, month: 0, day: 0, week: 0, hour: 0, minute: 0, second: 0, toString: durationToString }
 
   let remaining = seconds
-  if (remaining % YEAR_SECONDS < remaining) {
-    duration.year = Math.floor(remaining / YEAR_SECONDS)
-    remaining -= duration.year * YEAR_SECONDS
+  if (USE_LONG_DESCRIPTION) {
+    if (remaining % YEAR_SECONDS < remaining) {
+      duration.year = Math.floor(remaining / YEAR_SECONDS)
+      remaining -= duration.year * YEAR_SECONDS
+    }
+    if (remaining % MONTH_SECONDS < remaining) {
+      duration.month = Math.floor(remaining / MONTH_SECONDS)
+      remaining -= duration.month * MONTH_SECONDS
+    }
+    if (remaining % DAYS_SECONDS < remaining) {
+      duration.day = Math.floor(remaining / DAYS_SECONDS)
+      remaining -= duration.day * DAYS_SECONDS
+    } 
   }
-  if (remaining % MONTH_SECONDS < remaining) {
-    duration.month = Math.floor(remaining / MONTH_SECONDS)
-    remaining -= duration.month * MONTH_SECONDS
-  }
-  if (remaining % DAYS_SECONDS < remaining) {
-    duration.day = Math.floor(remaining / DAYS_SECONDS)
-    remaining -= duration.day * DAYS_SECONDS
-  }
+
   if (remaining % HOUR_SECONDS < remaining) {
     duration.hour = Math.floor(remaining / HOUR_SECONDS)
     remaining -= duration.hour * HOUR_SECONDS
